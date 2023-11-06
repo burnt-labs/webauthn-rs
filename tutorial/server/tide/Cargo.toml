@@ -2,7 +2,7 @@
 name = "tide-server"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.66.0"
+rust-version = "1.70.0"
 authors = ["William Brown <william@blackhats.net.au>"]
 license = "MPL-2.0"
 
@@ -17,4 +17,3 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 rand.workspace = true
 anyhow = "1.0"
-

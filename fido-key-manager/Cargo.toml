@@ -9,14 +9,21 @@ keywords = ["ctap", "fido", "passkeys", "webauthn"]
 license = "MPL-2.0"
 readme = "README.md"
 repository = "https://github.com/kanidm/webauthn-rs/"
-rust-version = "1.66.0"
+rust-version = "1.70.0"
 build = "build.rs"
+
+[[bin]]
+name = "fido-key-manager"
+# cargo can't run binaries needing elevation on Windows, and there's no tests
+# here anyway.
+test = false
 
 [features]
 # Bluetooth support is flakey on Linux and Windows, so not enabled by default.
 bluetooth = ["webauthn-authenticator-rs/bluetooth"]
 nfc = ["webauthn-authenticator-rs/nfc"]
 usb = ["webauthn-authenticator-rs/usb"]
+solokey = ["webauthn-authenticator-rs/vendor-solokey"]
 
 default = ["nfc", "usb"]
 

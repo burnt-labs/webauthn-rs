@@ -13,7 +13,7 @@ use openssl::x509::{
 };
 use openssl::{asn1, bn, ec, hash, pkey, rand, sign};
 use serde::{Deserialize, Serialize};
-use serde_cbor::value::Value;
+use serde_cbor_2::value::Value;
 use std::collections::HashMap;
 use std::iter;
 use std::{collections::BTreeMap, fs::File, io::Read};
@@ -46,6 +46,7 @@ pub struct SoftToken {
     intermediate_cert: X509,
     tokens: HashMap<Vec<u8>, Vec<u8>>,
     counter: u32,
+    falsify_uv: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -213,7 +214,7 @@ fn build_intermediate(
 }
 
 impl SoftToken {
-    pub fn new() -> Result<(Self, X509), WebauthnCError> {
+    pub fn new(falsify_uv: bool) -> Result<(Self, X509), WebauthnCError> {
         let (ca_key, ca_cert) = build_ca()?;
 
         let ca = ca_cert.clone();
@@ -250,6 +251,7 @@ impl SoftToken {
                 intermediate_cert,
                 tokens: HashMap::new(),
                 counter: 0,
+                falsify_uv,
             },
             ca,
         ))
@@ -265,14 +267,14 @@ impl SoftToken {
     }
 
     pub fn to_cbor(&self) -> Result<Vec<u8>, WebauthnCError> {
-        serde_cbor::ser::to_vec(self).map_err(|e| {
+        serde_cbor_2::ser::to_vec(self).map_err(|e| {
             error!("SoftToken.to_cbor: {:?}", e);
             WebauthnCError::Cbor
         })
     }
 
     pub fn from_cbor(v: &[u8]) -> Result<Self, WebauthnCError> {
-        serde_cbor::from_slice(v).map_err(|e| {
+        serde_cbor_2::from_slice(v).map_err(|e| {
             error!("SoftToken::from_cbor: {:?}", e);
             WebauthnCError::Cbor
         })
@@ -404,7 +406,7 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
         // As a result this really limits our usage to certain device classes. This is why we implement
         // this section in a seperate function call.
 
-        let (platform_attached, resident_key, _user_verification) =
+        let (platform_attached, resident_key, user_verification) =
             match &options.authenticator_selection {
                 Some(auth_sel) => {
                     let pa = auth_sel
@@ -421,6 +423,11 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
         let rp_id_hash = compute_sha256(options.rp.id.as_bytes()).to_vec();
 
         // =====
+
+        if user_verification && !self.falsify_uv {
+            error!("User Verification not supported by softtoken");
+            return Err(WebauthnCError::NotSupported);
+        }
 
         if platform_attached {
             error!("Platform Attachement not supported by softtoken");
@@ -492,7 +499,7 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
         map.insert(Value::Integer(-3), Value::Bytes(public_key_y));
 
         let pk_cbor = Value::Map(map);
-        let pk_cbor_bytes = serde_cbor::to_vec(&pk_cbor).map_err(|e| {
+        let pk_cbor_bytes = serde_cbor_2::to_vec(&pk_cbor).map_err(|e| {
             error!("PK CBOR -> {:x?}", e);
             WebauthnCError::Cbor
         })?;
@@ -515,7 +522,11 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
         // set counter to 0 during create
         // Combine rp_id_hash, flags, counter, acd, into authenticator data.
         // The flags are always att present, user verified, user present
-        let flags = 0b01000101;
+        let flags = if user_verification {
+            0b01000101
+        } else {
+            0b01000001
+        };
 
         let authdata: Vec<u8> = rp_id_hash
             .iter()
@@ -567,7 +578,7 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
 
         let ao = Value::Map(attest_map);
 
-        let ao_bytes = serde_cbor::to_vec(&ao).map_err(|e| {
+        let ao_bytes = serde_cbor_2::to_vec(&ao).map_err(|e| {
             error!("AO CBOR -> {:x?}", e);
             WebauthnCError::Cbor
         })?;
@@ -617,7 +628,7 @@ impl AuthenticatorBackendHashedClientData for SoftToken {
             client_data_json_hash,
             timeout_ms.into(),
             options.allow_credentials.as_slice(),
-            user_verification,
+            user_verification && self.falsify_uv,
         )?;
 
         trace!("u2sd -> {:x?}", u2sd);
@@ -680,7 +691,7 @@ impl U2FToken for SoftToken {
         allowed_credentials: &[AllowCredentials],
         user_verification: bool,
     ) -> Result<U2FSignData, WebauthnCError> {
-        if user_verification {
+        if user_verification && !self.falsify_uv {
             error!("User Verification not supported by softtoken");
             return Err(WebauthnCError::NotSupported);
         }
@@ -713,7 +724,12 @@ impl U2FToken for SoftToken {
         // Increment the counter.
         self.counter += 1;
         let counter = self.counter;
-        let flags = 0b00000101;
+
+        let flags = if user_verification {
+            0b00000101
+        } else {
+            0b00000001
+        };
 
         let verification_data: Vec<u8> = app_bytes
             .iter()
@@ -765,7 +781,7 @@ impl SoftTokenFile {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
-        let token: SoftToken = serde_cbor::from_slice(&buf).map_err(|e| {
+        let token: SoftToken = serde_cbor_2::from_slice(&buf).map_err(|e| {
             error!("Error reading SoftToken: {:?}", e);
             WebauthnCError::Cbor
         })?;
@@ -872,7 +888,7 @@ mod tests {
             None,
         );
 
-        let (soft_token, ca_root) = SoftToken::new().unwrap();
+        let (soft_token, ca_root) = SoftToken::new(true).unwrap();
 
         let mut wa = WebauthnAuthenticator::new(soft_token);
 
@@ -951,7 +967,7 @@ mod tests {
             None,
         );
 
-        let (soft_token, ca_root) = SoftToken::new().unwrap();
+        let (soft_token, ca_root) = SoftToken::new(true).unwrap();
         let file = tempfile().unwrap();
         let soft_token = SoftTokenFile::new(soft_token, file);
         assert_eq!(soft_token.token.tokens.len(), 0);
@@ -1038,7 +1054,7 @@ mod tests {
     #[test]
     fn perform_register_auth_with_command() {
         let _ = tracing_subscriber::fmt::try_init();
-        let (mut soft_token, _) = SoftToken::new().unwrap();
+        let (mut soft_token, _) = SoftToken::new(true).unwrap();
         let mut client_data_hash = vec![0; 32];
         let mut user_id = vec![0; 16];
         rand_bytes(&mut client_data_hash).unwrap();
@@ -1075,7 +1091,7 @@ mod tests {
         let response = perform_register_with_request(&mut soft_token, request, 10000).unwrap();
 
         // All keys should be ints
-        let m: Value = serde_cbor::from_slice(response.as_slice()).unwrap();
+        let m: Value = serde_cbor_2::from_slice(response.as_slice()).unwrap();
         let m = if let Value::Map(m) = m {
             m
         } else {
@@ -1137,7 +1153,7 @@ mod tests {
         );
 
         // Future assertions are signed with this COSEKey
-        let cose_key: Value = serde_cbor::from_slice(
+        let cose_key: Value = serde_cbor_2::from_slice(
             &verification_data[cred_id_off + 2 + cred_id_len..auth_data_len],
         )
         .unwrap();

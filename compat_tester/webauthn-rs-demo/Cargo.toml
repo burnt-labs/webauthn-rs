@@ -3,7 +3,7 @@ name = "webauthn-rs-demo"
 version = "0.1.0"
 authors = ["William Brown <william@blackhats.net.au>"]
 edition = "2021"
-rust-version = "1.66.0"
+rust-version = "1.70.0"
 build = "build.rs"
 
 description = "Webauthn Demonstration Server"
@@ -15,15 +15,18 @@ license = "MPL-2.0"
 webauthn-rs-demo-shared = { path = "../webauthn-rs-demo-shared", features = ["core"] }
 webauthn-rs-core.workspace = true
 webauthn-rs = { workspace = true, features = ["resident-key-support", "preview-features", "danger-allow-state-serialisation"] }
+webauthn-rs-device-catalog.workspace = true
+
 tide.workspace = true
-tide-rustls = "0.3"
 async-std.workspace = true
-openssl.workspace = true
 structopt = { version = "0.3", default-features = false }
-rustls = "0.19.0"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 rand.workspace = true
 url = { workspace = true , features = ["serde"] }
 
 serde.workspace = true
+
+[dependencies.tide-openssl]
+git = "https://github.com/victorcwai/tide-openssl.git"
+rev = "7d0e2215f2f1ebfa71aa30d132213ed45dd95cbf"

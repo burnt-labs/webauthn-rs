@@ -3,11 +3,11 @@ name = "webauthn-rs"
 version = "0.5.0-dev"
 authors = ["William Brown <william@blackhats.net.au>"]
 edition = "2021"
-rust-version = "1.66.0"
+rust-version = "1.70.0"
 description = "Webauthn Framework for Rust Web Servers"
 repository = "https://github.com/kanidm/webauthn-rs"
 readme = "../README.md"
-keywords = ["webauthn", "authentication"]
+keywords = ["webauthn", "authentication", "passkeys"]
 categories = ["authentication", "web-programming"]
 license = "MPL-2.0"
 
@@ -18,6 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 resident-key-support = []
 preview-features = []
+workaround-google-passkey-specific-issues = []
 danger-allow-state-serialisation = []
 danger-credential-internals = []
 danger-user-presence-only-security-keys = []
@@ -29,3 +30,6 @@ url = { workspace = true, features = ["serde"] }
 tracing.workspace = true
 serde.workspace = true
 uuid = { workspace = true, features = ["v4", "serde"] }
+
+[dev-dependencies]
+webauthn-rs-device-catalog.workspace = true

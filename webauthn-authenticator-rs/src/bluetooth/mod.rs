@@ -75,9 +75,9 @@ use crate::{
     transport::{
         types::{
             CBORResponse, KeepAliveStatus, Response, U2FError, BTLE_CANCEL, BTLE_KEEPALIVE,
-            TYPE_INIT, U2FHID_ERROR, U2FHID_MSG, U2FHID_PING,
+            U2FHID_ERROR, U2FHID_MSG, U2FHID_PING,
         },
-        Token, TokenEvent, Transport,
+        Token, TokenEvent, Transport, TYPE_INIT,
     },
     ui::UiCallback,
 };
@@ -524,8 +524,10 @@ impl Token for BluetoothToken {
 
             if let Response::KeepAlive(r) = resp {
                 trace!("waiting for {:?}", r);
-                if r == KeepAliveStatus::UserPresenceNeeded {
-                    ui.request_touch();
+                match r {
+                    KeepAliveStatus::UserPresenceNeeded => ui.request_touch(),
+                    KeepAliveStatus::Processing => ui.processing(),
+                    _ => (),
                 }
                 // TODO: maybe time out at some point
                 // thread::sleep(Duration::from_millis(100));

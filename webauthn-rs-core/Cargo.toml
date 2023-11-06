@@ -3,7 +3,7 @@ name = "webauthn-rs-core"
 version = "0.5.0-dev"
 authors = ["William Brown <william@blackhats.net.au>"]
 edition = "2021"
-rust-version = "1.66.0"
+rust-version = "1.70.0"
 description = "Webauthn Cryptographic Operation Handling"
 repository = "https://github.com/kanidm/webauthn-rs"
 readme = "README.md"
@@ -20,10 +20,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 base64.workspace = true
 base64urlsafedata.workspace = true
+webauthn-attestation-ca.workspace = true
 webauthn-rs-proto.workspace = true
 schemars.workspace = true
 serde.workspace = true
-serde_cbor.workspace = true
+serde_cbor_2.workspace = true
 serde_json.workspace = true
 nom.workspace = true
 thiserror.workspace = true
@@ -40,3 +41,4 @@ uuid = { workspace = true, features = ["serde"] }
 [dev-dependencies]
 hex-literal = "0.3"
 tracing-subscriber.workspace = true
+webauthn-rs-device-catalog.workspace = true

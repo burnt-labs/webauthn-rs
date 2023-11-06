@@ -126,6 +126,27 @@
 //! the UV *may* occur on registration and then will not occur again, and that is *by design*.
 //!
 //! If in doubt, do not enable this feature.
+//!
+//! ## 'Google Passkey stored in Google Password Manager' Specific Workarounds
+//!
+//! Android (with GMS Core) has a number of issues in the dialogs they present to users for authenticator
+//! selection. Instead of allowing the user to choose what kind of passkey they want to
+//! use and create (security key, device screen unlock or 'Google Passkey stored in Google Password
+//! Manager'), Android expects every website to implement their own selection UI's ahead of time
+//! so that the RP sends the specific options to trigger each of these flows. This adds complexity
+//! to RP implementations and a large surface area for mistakes, confusion and inconsistent
+//! workflows.
+//!
+//! By default for maximum compatibility and the most accessible user experience this library
+//! sends the options to trigger security keys and the device screen unlock as choices. As RPs
+//! must provide methods to allow users to enroll multiple independent devices, we consider that
+//! this is a reasonable trade since we allow the widest possible sets of authenticators and Android
+//! devices (including devices without GMS Core) to operate.
+//!
+//! To enable the registration call that triggers the 'Google Passkey stored in Google Password
+//! Manager' key flow, you can enable the feature `workaround-google-passkey-specific-issues`. This
+//! flow can only be used on Android devices with GMS Core, and you must have a way to detect this
+//! ahead of time.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
@@ -365,7 +386,7 @@ impl<'a> WebauthnBuilder<'a> {
 ///
 /// > If you really want a security key, you should use [`start_securitykey_registration`](Webauthn::start_securitykey_registration)
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Webauthn {
     core: WebauthnCore,
     algorithms: Vec<COSEAlgorithm>,
@@ -470,6 +491,62 @@ impl Webauthn {
                 // and can't satisfy it, they fail the operation instead.
                 enforce_credential_protection_policy: Some(false),
             }),
+            uvm: Some(true),
+            cred_props: Some(true),
+            min_pin_length: None,
+            hmac_create_secret: None,
+        });
+
+        self.core
+            .generate_challenge_register_options(
+                user_unique_id.as_bytes(),
+                user_name,
+                user_display_name,
+                attestation,
+                policy,
+                exclude_credentials,
+                extensions,
+                credential_algorithms,
+                require_resident_key,
+                authenticator_attachment,
+                reject_passkeys,
+            )
+            .map(|(ccr, rs)| (ccr, PasskeyRegistration { rs }))
+    }
+
+    /// Initiate the registration of a 'Google Passkey stored in Google Password Manager' on an
+    /// Android device with GMS Core.
+    ///
+    /// This function is required as Android's support for Webauthn/Passkeys is broken
+    /// and does not correctly perform authenticator selection for the user. Instead
+    /// of Android correctly presenting the choice to users to select between a
+    /// security key, or a 'Google Passkey stored in Google Password Manager', Android
+    /// expects the Relying Party to pre-select this and send a correct set of options for either
+    /// a security key *or* a 'Google Passkey stored in Google Password Manager'.
+    ///
+    /// If you choose to use this function you *MUST* ensure that the device you are
+    /// contacting is an Android device with GMS Core, and you *MUST* provide the user the choice
+    /// on your site ahead of time to choose between a security key / screen unlock
+    /// (triggered by [`start_passkey_registration`](Webauthn::start_passkey_registration))
+    /// or a 'Google Passkey stored in Google Password Manager' (triggered by this function).
+    #[cfg(feature = "workaround-google-passkey-specific-issues")]
+    pub fn start_google_passkey_in_google_password_manager_only_registration(
+        &self,
+        user_unique_id: Uuid,
+        user_name: &str,
+        user_display_name: &str,
+        exclude_credentials: Option<Vec<CredentialID>>,
+    ) -> WebauthnResult<(CreationChallengeResponse, PasskeyRegistration)> {
+        let attestation = AttestationConveyancePreference::None;
+        let credential_algorithms = self.algorithms.clone();
+        let require_resident_key = true;
+        let authenticator_attachment = Some(AuthenticatorAttachment::Platform);
+        let policy = Some(UserVerificationPolicy::Required);
+        let reject_passkeys = false;
+
+        let extensions = Some(RequestRegistrationExtensions {
+            // Android doesn't support cred protect.
+            cred_protect: None,
             uvm: Some(true),
             cred_props: Some(true),
             min_pin_length: None,
@@ -670,13 +747,21 @@ impl Webauthn {
     ///
     /// // Only allow credentials from manufacturers that are trusted and part of the webauthn-rs
     /// // strict "high quality" list.
+    ///
+    /// use webauthn_rs_device_catalog::Data;
+    /// let device_catalog = Data::strict();
+    ///
+    /// let attestation_ca_list = (&device_catalog)
+    ///     .try_into()
+    ///     .expect("Failed to build attestation ca list");
+    ///
     /// let (ccr, skr) = webauthn
     ///     .start_securitykey_registration(
     ///         Uuid::new_v4(),
     ///         "claire",
     ///         "Claire",
     ///         None,
-    ///         Some(AttestationCaList::strict()),
+    ///         Some(attestation_ca_list),
     ///         None,
     ///     )
     ///     .expect("Failed to start registration.");
@@ -913,6 +998,7 @@ impl Webauthn {
     ///
     /// ```
     /// # use webauthn_rs::prelude::*;
+    /// use webauthn_rs_device_catalog::Data;
     ///
     /// # let rp_id = "example.com";
     /// # let rp_origin = Url::parse("https://idm.example.com")
@@ -926,7 +1012,14 @@ impl Webauthn {
     /// // use an existed UUID source.
     /// let user_unique_id = Uuid::new_v4();
     ///
-    /// // Initiate a basic registration flow, allowing any cryptograhpic authenticator to proceed.
+    /// // Create a device catalog reference that contains a list of known high quality authenticators
+    /// let device_catalog = Data::all_known_devices();
+    ///
+    /// let attestation_ca_list = (&device_catalog)
+    ///     .try_into()
+    ///     .expect("Failed to build attestation ca list");
+    ///
+    /// // Initiate a basic registration flow, allowing any attested cryptograhpic authenticator to proceed.
     /// // Hint (but do not enforce) that we prefer this to be a token/key like a yubikey.
     /// // To enforce this you can validate the properties of the returned device aaguid.
     /// let (ccr, skr) = webauthn
@@ -935,7 +1028,7 @@ impl Webauthn {
     ///         "claire",
     ///         "Claire",
     ///         None,
-    ///         AttestationCaList::strict(),
+    ///         attestation_ca_list,
     ///         Some(AuthenticatorAttachment::CrossPlatform),
     ///     )
     ///     .expect("Failed to start registration.");
@@ -944,13 +1037,20 @@ impl Webauthn {
     /// // strict "high quality" list.
     /// // Hint (but do not enforce) that we prefer this to be a device like TouchID.
     /// // To enforce this you can validate the attestation ca used along with the returned device aaguid
+    ///
+    /// let device_catalog = Data::strict();
+    ///
+    /// let attestation_ca_list = (&device_catalog)
+    ///     .try_into()
+    ///     .expect("Failed to build attestation ca list");
+    ///
     /// let (ccr, skr) = webauthn
     ///     .start_attested_passkey_registration(
     ///         Uuid::new_v4(),
     ///         "claire",
     ///         "Claire",
     ///         None,
-    ///         AttestationCaList::strict(),
+    ///         attestation_ca_list,
     ///         Some(AuthenticatorAttachment::Platform),
     ///     )
     ///     .expect("Failed to start registration.");
